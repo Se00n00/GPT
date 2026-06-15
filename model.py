@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 
 class LayerNorm(nn.Module):
-    def __init__(self, d_model:int):
+    def __init__(self, d_model:int, device = 'cpu'):
         super().__init__()
 
         self.weights = nn.Parameter(torch.ones(d_model)) # requires_grad = True
@@ -25,7 +25,6 @@ class RMSNorm(nn.Module):
     def forward(self, X:torch.Tensor) ->torch.Tensor:
         normallized = X * torch.rsqrt(X.pow(2).mean(-1, keepdim=True) + self.epsilon)
 
-        print(normallized.shape)
         return normallized.type_as(X) * self.weights
 
 class FeedForward(nn.Module):
@@ -145,7 +144,7 @@ class Transformer(nn.Module):
 
         self.embedding = EmbeddingLayer(config.vocab_size, config.block_size, config.d_model)
         self.blocks = nn.ModuleList([Block(config) for _ in range(config.num_layer)])
-        self.head_proj = nn.Linear(config.d_model, config.vocab_size)
+        self.head_proj = nn.Linear(config.d_model, config.vocab_size, bias = False)
 
     def forward(self, X:torch.Tensor):
         X = self.embedding(X)
@@ -154,6 +153,6 @@ class Transformer(nn.Module):
             X = block(X)
 
         output = self.head_proj(X)
-        
-        return output, output[:,-1, :] # [B, L, vocab_size], [B, 1, vocab_size]
+
+        return output, output[:,[-1], :] # [B, L, vocab_size], [B, 1, vocab_size]
         
