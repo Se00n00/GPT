@@ -7,7 +7,7 @@ from tokenizers.trainers import BpeTrainer
 from tokenizers.processors import TemplateProcessing
 
 class BPETokenizer:
-    def __init__(self, path: str, files: None|list[str], vocab_size: int=30000):
+    def __init__(self, path: str, files: None|list[str] = None, vocab_size: int=30000):
 
         try:
             self.tokenizer = Tokenizer.from_file(path)
@@ -24,7 +24,10 @@ class BPETokenizer:
         self.unk_id = self.tokenizer.token_to_id("[UNK]")
         self.bos_id = self.tokenizer.token_to_id("<|START|>")
         self.eos_id = self.tokenizer.token_to_id("<|END|>")
-        print(self.vocab_size)
+        
+        print("\n--------------------------------------------------------------------------")
+        print(f"VOCAB SIZE: {self.vocab_size} | SPECIAL TOKENS: [PAD] [UNK] <|START|> <|END|>")
+        print("--------------------------------------------------------------------------\n")
 
     def _train(self, files: None | list[str], vocab_size: int):
 

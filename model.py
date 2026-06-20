@@ -9,14 +9,14 @@ class Config:
     num_layer: int = 10
     max_len: int = 1024
     vocab_size: int = 30000
-    block_size: int = 8
+    block_size: int = 1024
 
-    d_model: int = 1024
+    d_model: int = 512
     num_heads: int = 8
-    dropout_prob: float = 0.5
+    dropout_prob: float = 0.1
     
     # Feedforward
-    ff_hidden_d: int|None = 4096
+    ff_hidden_d: int|None = 2048
     ff_gated:bool = True
 
     # RMS Norm
@@ -101,8 +101,8 @@ class Attention(nn.Module):
         K = K.view(batch, seqlen, self.num_heads, self.head_dim).transpose(1,2)
         V = V.view(batch, seqlen, self.num_heads, self.head_dim).transpose(1,2)
 
-        scores = torch.matmul(Q, K.transpose(2,3)) / math.sqrt(d_model)
-        scores = scores + self.attention_mask[:,:,seqlen, seqlen]
+        scores = torch.matmul(Q, K.transpose(2,3)) / math.sqrt(self.head_dim)
+        scores = scores + self.attention_mask[:, :, :seqlen, :seqlen]
         scores = F.softmax(scores, dim = -1)
         scores = self.attention_dropout(scores)
         output = torch.matmul(scores, V)
@@ -118,9 +118,10 @@ class EmbeddingLayer(nn.Module):
         self.position_encoding = nn.Embedding(block_size, d_model)
 
     def forward(self, X:torch.Tensor):
-
-        # [B, L, d_model] <-- ([B, L, d_model]+[B, L, d_model]) <-- [B,L]
-        return self.token_encoding(X) + self.position_encoding(X)
+        seq_len = X.size(1)
+        pos = torch.arange(0, seq_len, dtype=torch.long, device=X.device)
+        # [B, L, d_model] <-- [B, L, d_model] + [L, d_model]
+        return self.token_encoding(X) + self.position_encoding(pos)
 
 class Block(nn.Module):
     def __init__(self, config: Config):
@@ -144,14 +145,30 @@ class Model(nn.Module):
         self.embedding = EmbeddingLayer(config.vocab_size, config.block_size, config.d_model)
         self.blocks = nn.ModuleList([Block(config) for _ in range(config.num_layer)])
         self.head_proj = nn.Linear(config.d_model, config.vocab_size, bias = False)
+        self.apply(self._init_weights)
 
-    def forward(self, X:torch.Tensor):
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, X:torch.Tensor, Y:torch.Tensor):
         X = self.embedding(X)
         
         for block in self.blocks:
             X = block(X)
 
         output = self.head_proj(X)
+        
+        if Y is not None:
+            loss = F.cross_entropy(output.view(-1, output.size(-1)), Y.view(-1), ignore_index=257)
+            return output, loss
+        else:
+            # logits = self.output(h[:, -1:, :])
+            # return logits, pkv_next
 
-        return output, output[:,[-1], :] # [B, L, vocab_size], [B, 1, vocab_size]
+            return output, output[:,[-1], :] # [B, L, vocab_size], [B, 1, vocab_size]
         

@@ -1,5 +1,12 @@
 __pycache__/
 
+# Dataset & Tokens
 Datasets/train
 Datasets/test
 Datasets/validation
+Datasets/Tokens
+
+# Model Checkpoints
+checkpoints/
+
+
