@@ -46,7 +46,7 @@ class RMSNorm(nn.Module):
         return normallized.type_as(X) * self.weights
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model:int, hidden_d:int|None = None, gated:bool = True):
+    def __init__(self, d_model:int, hidden_d:int|None = None, gated:bool = True, dropout_prob=0.5):
         super().__init__()
 
         if not hidden_d:
@@ -58,7 +58,7 @@ class FeedForward(nn.Module):
         if gated:
             self.gate_proj = nn.Linear(d_model, hidden_d, bias= False)
         self.down_proj = nn.Linear(hidden_d, d_model, bias = False)
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(dropout_prob)
 
 
     def forward(self, X:torch.Tensor) -> torch.Tensor:
@@ -130,7 +130,7 @@ class Block(nn.Module):
         self.norm1 = RMSNorm(config.d_model, config.norm_epsilon)
         self.norm2 = RMSNorm(config.d_model, config.norm_epsilon)
         self.attention = Attention(config.d_model, config.num_heads, config.max_len, config.dropout_prob)
-        self.feedforward = FeedForward(config.d_model, config.ff_hidden_d, config.ff_gated)
+        self.feedforward = FeedForward(config.d_model, config.ff_hidden_d, config.ff_gated, config.dropout_prob)
 
     def forward(self, X:torch.Tensor):
         X = X + self.attention(self.norm1(X))

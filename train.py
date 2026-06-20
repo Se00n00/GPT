@@ -322,8 +322,10 @@ if __name__ == "__main__":
                 device_type = "cuda" if device.type == "cuda" else "cpu"
 
                 for micro_step in range(GRAD_ACCUM_STEPS):
+                    global_micro_step = step*GRAD_ACCUM_STEPS + micro_step
+
                     x, y = get_batch(
-                        step, train_data, datalen, BATCH_SIZE, args.max_seq_len, device
+                        global_micro_step, train_data, datalen, BATCH_SIZE, args.max_seq_len, device
                     )
 
                     with autocast(device_type=device_type, dtype=ptdtype):
