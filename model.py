@@ -163,7 +163,7 @@ class Model(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, X:torch.Tensor, Y:torch.Tensor):
+    def forward(self, X:torch.Tensor, Y:torch.Tensor, pad_index:int = 0):
         X = self.embedding(X)
         
         for block in self.blocks:
@@ -172,7 +172,7 @@ class Model(nn.Module):
         output = self.head_proj(X)
         
         if Y is not None:
-            loss = F.cross_entropy(output.view(-1, output.size(-1)), Y.view(-1), ignore_index=257)
+            loss = F.cross_entropy(output.view(-1, output.size(-1)), Y.view(-1), ignore_index=pad_index)
             return output, loss
         else:
             # logits = self.output(h[:, -1:, :])

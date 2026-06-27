@@ -148,7 +148,8 @@ def evaluate_loss(model, data, batch_size, max_seq_len, device, eval_steps=1000)
             len(data),
             batch_size,
             max_seq_len,
-            device
+            device,
+            rand = True
         )
 
         with autocast(device_type=device_type, dtype=ptdtype):

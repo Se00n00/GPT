@@ -15,11 +15,18 @@ def generate(model, tokenizer, prompt, max_new_tokens, temperature=1.0, top_k=50
     model.eval()
     
     # 1. Encode prompt
-    input_ids = tokenizer.encode(prompt).ids
+    tokenized = tokenizer.encode(prompt)
+    
+    input_ids =tokenized.ids
+    if input_ids[-1] == tokenizer.eos_id:
+        input_ids.pop()
+        
     if not input_ids:
         # If prompt was empty or tokenized to nothing, use endoftext
-        input_ids = [tokenizer.eos_id]
-        
+        input_ids = [tokenizer.bos_id]
+    
+    print(tokenizer.decode(input_ids), end=" ", flush=True)    
+    
     input_tensor = torch.tensor([input_ids], dtype=torch.long, device=device) # [1, T]
     
     generated = list(input_ids)
@@ -86,6 +93,9 @@ def generate(model, tokenizer, prompt, max_new_tokens, temperature=1.0, top_k=50
             dtype=torch.long,
             device=device
         )
+        if len(generated) > 512:
+            break
+        print(tokenizer.decode([next_token_id]), end=" ", flush=True)
 
         
     return tokenizer.decode(generated)
@@ -108,7 +118,7 @@ def main():
     
     args = parser.parse_args()
 
-    TOKENIZER_DIR = "Datasets/tokenizer.json"
+    TOKENIZER_DIR = "Datasets/sft_tokenizer.json"
     # Load tokenizer
     if not os.path.exists(TOKENIZER_DIR):
         print(f"Error: Tokenizer not found in {TOKENIZER_DIR}. Please run train.py first to build the vocabulary!")
@@ -124,7 +134,7 @@ def main():
     # Set checkpoint path if not provided
     checkpoint_file = args.checkpoint
     if checkpoint_file is None:
-        checkpoint_file = f"checkpoints/best_{args.model}.pt"
+        checkpoint_file = f"checkpoints/expanded_{args.model}.pt"
 
     # Initialize model
     match args.model:
@@ -138,14 +148,14 @@ def main():
         print(f"Loading checkpoint weights from {checkpoint_file}...")
         checkpoint = torch.load(checkpoint_file, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
-        print(f"Loaded successfully (saved at training step {checkpoint['step']})")
+        print("Loaded successfully")
     else:
         print(f"WARNING: Checkpoint '{checkpoint_file}' not found. Generating with an UNTRAINED model (random weights)!")
 
     model.to(device)
 
     # Generate text
-    print(f"\nGenerating {args.max_new_tokens} tokens with prompt: \"{args.prompt}\"")
+    # print(f"\nGenerating {args.max_new_tokens} tokens with prompt: \"{args.prompt}\"")
     print("-" * 60)
     output_text = generate(
         model=model,
@@ -157,7 +167,8 @@ def main():
         top_p=args.top_p,
         device=device
     )
-    print(output_text)
+    # print(output_text)
+    print("\n")
     print("-" * 60)
 
 if __name__ == "__main__":
