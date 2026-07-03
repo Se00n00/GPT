@@ -38,6 +38,33 @@
       "rstrip": false,
       "normalized": false,
       "special": true
+    },
+    {
+      "id": 32768,
+      "content": "<|SYSTEM|>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 32769,
+      "content": "<|USER|>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 32770,
+      "content": "<|ASSISTANT|>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
     }
   ],
   "normalizer": {

@@ -114,7 +114,7 @@ class Attention(nn.Module):
         scores = F.softmax(scores, dim = -1)
         scores = self.attention_dropout(scores)
         output = torch.matmul(scores, V)
-
+        
         # [B, L, D_model] <-- [B, L, num_heads, head_dim] <-- [B, num_heads, L, head_dim]
         output = output.transpose(1, 2).contiguous().view(batch, seqlen, -1)
         return self.output_dropout(self.o_proj(output))

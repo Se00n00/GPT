@@ -1,3 +1,6 @@
+import os
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import argparse
 import math
 import os
@@ -77,6 +80,12 @@ def parse_arguments():
         default=None,
         help="Path to checkpoint to resume training from (or 'auto' to auto-detect best checkpoint)",
     )
+    parser.add_argument(
+        "--pipeline",
+        type=str,
+        default='pt',
+        help="Pipeline process: pt, it,..",
+    )
 
     parser.add_argument(
         "--vram_limit_mb",
@@ -112,31 +121,40 @@ def parse_arguments():
     return args
 
 
-def get_batch(step, data, data_len, batch_size, max_seq_len, device, rand=False):
+def get_batch(step, data, data_len, batch_size, max_seq_len, device, rand=False, instruction_set=False, labels = None):
     """
     Fetches a sequential batch of X and Y from tokenized binary data.
     """
     start = (step * batch_size * max_seq_len) % (data_len - max_seq_len - 1)
 
-    ix = torch.arange(start, start + batch_size * max_seq_len, max_seq_len)
-
-    if rand == True:
+    
+    if rand:
         ix = torch.randint(start, data_len-max_seq_len-1, (batch_size,)) 
+    else:
+        ix = torch.arange(start, start + batch_size * max_seq_len, max_seq_len)
 
     x = torch.stack(
         [torch.from_numpy(data[i : i + max_seq_len].astype(np.int64)) for i in ix]
     )
-
-    y = torch.stack(
-        [torch.from_numpy(data[i + 1 : i + 1 + max_seq_len].astype(np.int64)) for i in ix]
-    )
+    
+    if instruction_set:
+        assert labels is not None, "labels must be provided for instruction tuning."
+       
+        y = torch.stack([
+            torch.from_numpy(labels[i + 1:i + 1 + max_seq_len].astype(np.int64))
+            for i in ix
+        ])
+    else:
+        y = torch.stack(
+            [torch.from_numpy(data[i + 1 : i + 1 + max_seq_len].astype(np.int64)) for i in ix]
+        )
 
     return x.to(device), y.to(device)
 
 from tqdm import tqdm
 
 @torch.no_grad()
-def evaluate_loss(model, data, batch_size, max_seq_len, device, eval_steps=1000):
+def evaluate_loss(model, data, batch_size, max_seq_len, device, eval_steps=1000, data_labels = None):
     model.eval()
 
     total_loss = 0.0
@@ -149,19 +167,27 @@ def evaluate_loss(model, data, batch_size, max_seq_len, device, eval_steps=1000)
             batch_size,
             max_seq_len,
             device,
-            rand = True
+            rand = True,
+            instruction_set=True,
+            labels = data_labels
         )
 
         with autocast(device_type=device_type, dtype=ptdtype):
-            _, loss = model(x, y)
-
+            logits, loss = model(x, y)
+        
+        if torch.isnan(loss):
+            continue
         total_loss += loss.item()
+        
+    
+        del logits 
+        del loss 
+    torch.cuda.empty_cache()
 
     model.train()
 
     return total_loss / eval_steps
 
-import math
 import csv
 from pathlib import Path
 
@@ -191,11 +217,13 @@ def log_metrics(csv_path, step, loss, lr):
         
 DATAPATH = {
     "train": {
-        "token_path": "Datasets/Tokens/train_tokens.bin",
+        "token_path": "Datasets/Tokens/sft_train_tokens.bin",
+        "label_path": "Datasets/Tokens/sft_train_labels.bin",
         "dataset_path": "Datasets/train",
     },
     "validation": {
-        "token_path": "Datasets/Tokens/val_tokens.bin",
+        "token_path": "Datasets/Tokens/sft_val_tokens.bin",
+        "label_path": "Datasets/Tokens/sft_val_labels.bin",
         "dataset_path": "Datasets/validation",
     }
 }
@@ -216,9 +244,13 @@ if __name__ == "__main__":
     tokenizer = BPETokenizer(path="Datasets/tokenizer.json")
     prepare_datasets(DATAPATH)
 
-    # 2. LOAD MEMMAPPED TOKEN DATA
-    train_data = np.memmap("Datasets/Tokens/train_tokens.bin", dtype=np.uint16, mode="r")
-    val_data = np.memmap("Datasets/Tokens/val_tokens.bin", dtype=np.uint16, mode="r")
+    # 2. LOAD MEMMAPPED TOKEN DATA    
+    train_data = np.memmap(DATAPATH['train']['token_path'], dtype=np.uint16, mode="r")
+    val_data = np.memmap(DATAPATH['validation']['token_path'], dtype=np.uint16, mode="r")
+    
+    if args.pipeline == 'it':
+        train_data_labels = np.memmap(DATAPATH['train']['label_path'], dtype=np.uint16, mode="r")
+        val_data_labels = np.memmap(DATAPATH['validation']['label_path'], dtype=np.uint16, mode="r")
 
     # 4. Instantiate Model and Setup Device / Precision
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -268,7 +300,8 @@ if __name__ == "__main__":
     #     print("Gradient Checkpointing enabled from scratch.")
 
     model.to(device)
-
+    
+    args.learning_rate = args.learning_rate if args.pipeline == "pt" else 1e-4
     # 5. Setup Optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(), weight_decay=args.weight_decay, lr=args.learning_rate
@@ -282,7 +315,7 @@ if __name__ == "__main__":
     if args.resume is not None:
         resume_path = args.resume
         if resume_path.lower() == "auto":
-            resume_path = os.path.join(args.checkpoint_dir, f"best_{args.model}.pt")
+            resume_path = os.path.join(args.checkpoint_dir, f"{args.model}_{args.pipeline}.pt")
 
         if os.path.exists(resume_path):
             print(f"Resuming training from checkpoint: {resume_path}")
@@ -307,7 +340,22 @@ if __name__ == "__main__":
             print(
                 f"Warning: Checkpoint path '{resume_path}' not found. Starting training from scratch (step 0)."
             )
-
+            
+    if args.pipeline == 'it' and args.resume is None:
+        resume_path = os.path.join(args.checkpoint_dir, f"{args.model}_{args.pipeline}.pt")
+        if os.path.exists(resume_path):
+            print(f"Resuming training from checkpoint: {resume_path}")
+            checkpoint = torch.load(
+                resume_path, map_location=device, weights_only=False
+            )
+            model.load_state_dict(checkpoint["model_state_dict"])
+            print(
+                f"Resumed successfully. Continuing from step {step} with best val loss: {best_val_loss:.4f}"
+            )
+        else:
+            print(
+                f"Warning: Checkpoint path '{resume_path}' not found. Starting training from scratch (step 0)."
+            )
     t0 = time.time()
 
     
@@ -353,6 +401,7 @@ if __name__ == "__main__":
 
 
     while step < steps_per_epoch:
+        
         # Check GPU temperature and pause if needed
         check_and_cooldown_gpu(args.max_temp, args.cooldown_temp)
 
@@ -366,7 +415,9 @@ if __name__ == "__main__":
 
         # Self-healing OOM/limit recovery loop
         while not step_completed:
+            torch.cuda.empty_cache()
             try:
+                #print("INITIAL ",torch.cuda.memory_allocated()/1024**2,"\n")
                 optimizer.zero_grad(set_to_none=True)
                 loss_accum = 0.0
 
@@ -382,12 +433,23 @@ if __name__ == "__main__":
                     global_micro_step = step*GRAD_ACCUM_STEPS + micro_step
 
                     x, y = get_batch(
-                        global_micro_step, train_data, datalen, BATCH_SIZE, args.max_seq_len, device
+                        global_micro_step, train_data, datalen, BATCH_SIZE, args.max_seq_len, device, instruction_set = True, labels = train_data_labels
                     )
+                    # print(y.dtype)
+                    # print(y.min().item(), y.max().item())
+                    # print(tokenizer.vocab_size)
+                    #print("AFTER TRAIN DATASET ",torch.cuda.memory_allocated()/1024**2,"\n")
 
                     with autocast(device_type=device_type, dtype=ptdtype):
                         logits, loss = model(x, y)
                         loss = loss / GRAD_ACCUM_STEPS
+                        
+                    #print("AFTER TRAIN FORWARD ",torch.cuda.memory_allocated()/1024**2,"\n")
+                    
+                    if torch.isnan(loss):
+                        print("NaN loss encountered, skipping batch")
+                        optimizer.zero_grad(set_to_none=True)
+                        continue
 
                     loss_accum += loss.item()
 
@@ -395,6 +457,9 @@ if __name__ == "__main__":
                         scaler.scale(loss).backward()
                     else:
                         loss.backward()
+                        
+                    #print("AFTER TRAIN BACKWARD ",torch.cuda.memory_allocated()/1024**2,"\n")
+
 
                 # Step the optimizer
                 if ptdtype == torch.float16:
@@ -449,13 +514,18 @@ if __name__ == "__main__":
 
         # Periodic evaluation & logging
         if step % args.eval_interval == 0 or step == steps_per_epoch - 1:
+            #print("BEFORE VAL",torch.cuda.memory_allocated()/1024**2,"\n")
+
             val_loss = evaluate_loss(
                 model,
                 val_data,
                 1,
                 args.max_seq_len,
-                device
+                device,
+                data_labels=val_data_labels
             )
+            #print("AFTER VAL",torch.cuda.memory_allocated()/1024**2,"\n")
+
             val_ppl = math.exp(val_loss) if val_loss < 30 else float("inf")
             train_ppl = math.exp(loss_accum) if loss_accum < 30 else float("inf")
 
@@ -485,7 +555,7 @@ if __name__ == "__main__":
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 checkpoint_path = os.path.join(
-                    args.checkpoint_dir, f"best_{args.model}.pt"
+                    args.checkpoint_dir, f"{args.model}_{args.pipeline}.pt"
                 )
                 torch.save(
                     {
