@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from Datasets.tokenizer import BPETokenizer
 from model import Config, Model
-from Training import (
+from Trainer import (
     check_and_cooldown_gpu,
     check_vram_limit,
     get_gpu_temperature,
