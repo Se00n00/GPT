@@ -9,6 +9,7 @@ Datasets/Tokens
 # Model Checkpoints
 checkpoints/
 best_GPT.pt
-
+GPT_pt.pt
+GPT_it.pt
 
 test_tokenizer.py

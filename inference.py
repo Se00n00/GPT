@@ -118,6 +118,44 @@ def generate(model, tokenizer, user_prompt, max_new_tokens, temperature=1.0, top
 
 from Datasets.tokenizer import BPETokenizer
 from model import Config, Model
+from dataclasses import dataclass, field
+from typing import Literal, Optional
+
+@dataclass
+class TrainingConfig:
+    # Required Arguments
+    training_name: str
+
+    # Model & Architecture Configuration
+    model: Literal["GPT"] = "GPT"
+    batch_size: int = field(default=8, metadata={"help": "Micro-batch size (reduced to fit in VRAM)"})
+    grad_accum_steps: int = field(default=4, metadata={"help": "Gradient accumulation steps"})
+    max_seq_len: int = field(default=512, metadata={"help": "Maximum Sequence length"})
+
+    # Optimization Parameters
+    learning_rate: float = field(default=3e-4, metadata={"help": "Max learning rate"})
+    weight_decay: float = field(default=0.1, metadata={"help": "Weight Decay rate"})
+
+    # Training Schedule
+    max_steps: int = field(default=20000, metadata={"help": "Total training steps"})
+    warmup_steps: int = field(default=200, metadata={"help": "LR warmup steps"})
+    eval_interval: int = field(default=200, metadata={"help": "Steps between evaluations"})
+    eval_iters: int = field(default=50, metadata={"help": "Evaluation iterations"})
+
+    # Paths & State
+    checkpoint_dir: str = field(default="checkpoints", metadata={"help": "Directory to save model checkpoints"})
+    tokenizer_dir: str = field(default="tokenizer_vocab", metadata={"help": "BPE tokenizer directory"})
+    resume: Optional[str] = field(default=None, metadata={"help": "Path to checkpoint to resume training from (or 'auto')"})
+    pipeline: Literal["PT", "IFT", "PFT"] = field(default="PT", metadata={"help": "Pipeline process: PT, IFT, PFT"})
+
+    # Hardware & Thermal Guardrails
+    vram_limit_mb: int = field(default=14000, metadata={"help": "Target upper limit of VRAM usage in MB"})
+    max_temp: int = field(default=75, metadata={"help": "GPU Temperature threshold to trigger cooldown in °C"})
+    cooldown_temp: int = field(default=60, metadata={"help": "Target GPU Temperature to cool down to in °C"})
+
+    # Performance Flags
+    disable_amp: bool = field(default=False, metadata={"help": "Disable automatic mixed precision (AMP)"})
+    gradient_checkpointing: bool = field(default=False, metadata={"help": "Start training with gradient checkpointing enabled"})
 
 def main():
     parser = argparse.ArgumentParser(description="Generate text using trained 10M GPT-2 or Advanced model.")
@@ -150,7 +188,7 @@ def main():
     # Set checkpoint path if not provided
     checkpoint_file = args.checkpoint
     if checkpoint_file is None:
-        checkpoint_file = f"checkpoints/{args.model}_it.pt"
+        checkpoint_file = f"checkpoints/{args.model}_PFT.pt"
 
     # Initialize model
     match args.model:
@@ -162,7 +200,7 @@ def main():
     # Load weights
     if os.path.exists(checkpoint_file):
         print(f"Loading checkpoint weights from {checkpoint_file}...")
-        checkpoint = torch.load(checkpoint_file, map_location=device, weights_only=False)
+        checkpoint = torch.load(checkpoint_file, map_location=device, weights_only=False )
         model.load_state_dict(checkpoint["model_state_dict"])
         print("Loaded successfully")
     else:

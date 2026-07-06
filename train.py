@@ -20,23 +20,16 @@ from Trainer import (
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Tiny Parrot")
 
-    MODEL_HELP = """
-    |--------------------------------------|
-        AVAILABLE MODELS
-    |--------------------------------------|
-        GPT : GPT-2 Style Transformer
-    """
-    
     parser.add_argument(
-        "--training_name", type=str, help=MODEL_HELP
+        "--training_name", type=str
     )
     parser.add_argument(
-        "--model", type=str, choices=["GPT"], default="GPT", help=MODEL_HELP
+        "--model", type=str, choices=["GPT"], default="GPT"
     )
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=8,
+        default=1,
         help="Micro-batch size (reduced to fit in VRAM)",
     )
     parser.add_argument(
@@ -83,7 +76,8 @@ def parse_arguments():
     parser.add_argument(
         "--pipeline",
         type=str,
-        default='pt',
+        choices=["PT","IFT","PFT"], # Pre-training, Instruction Finetunning, Preference Fine-Tunning
+        default='PT',
         help="Pipeline process: pt, it,..",
     )
 
@@ -121,75 +115,259 @@ def parse_arguments():
     return args
 
 
-def get_batch(step, data, data_len, batch_size, max_seq_len, device, rand=False, instruction_set=False, labels = None):
+def get_batch(
+    step,
+    data,
+    data_len,
+    batch_size,
+    max_seq_len,
+    device,
+    pipeline,
+    rand=False,
+):
     """
-    Fetches a sequential batch of X and Y from tokenized binary data.
+    Fetches a batch for Pretraining / IFT / PFT.
     """
-    start = (step * batch_size * max_seq_len) % (data_len - max_seq_len - 1)
 
-    
-    if rand:
-        ix = torch.randint(start, data_len-max_seq_len-1, (batch_size,)) 
-    else:
-        ix = torch.arange(start, start + batch_size * max_seq_len, max_seq_len)
+    batch = {}
 
-    x = torch.stack(
-        [torch.from_numpy(data[i : i + max_seq_len].astype(np.int64)) for i in ix]
-    )
-    
-    if instruction_set:
-        assert labels is not None, "labels must be provided for instruction tuning."
-       
-        y = torch.stack([
-            torch.from_numpy(labels[i + 1:i + 1 + max_seq_len].astype(np.int64))
-            for i in ix
-        ])
-    else:
-        y = torch.stack(
-            [torch.from_numpy(data[i + 1 : i + 1 + max_seq_len].astype(np.int64)) for i in ix]
-        )
+    match pipeline:
 
-    return x.to(device), y.to(device)
+        # -------------------------------------------------
+        # IFT
+        # -------------------------------------------------
+        case "IFT":
+
+            start = (step * batch_size * max_seq_len) % (
+                data_len - max_seq_len - 1
+            )
+
+            if rand:
+                ix = torch.randint(
+                    start,
+                    data_len - max_seq_len - 1,
+                    (batch_size,),
+                )
+            else:
+                ix = torch.arange(
+                    start,
+                    start + batch_size * max_seq_len,
+                    max_seq_len,
+                )
+
+            batch["inputs"] = torch.stack([
+                torch.from_numpy(
+                    data["token_path"][i:i + max_seq_len].astype(np.int64)
+                )
+                for i in ix
+            ]).to(device)
+
+            batch["labels"] = torch.stack([
+                torch.from_numpy(
+                    data["label_path"][i:i + max_seq_len].astype(np.int64)
+                )
+                for i in ix
+            ]).to(device)
+
+        # -------------------------------------------------
+        # PFT / DPO
+        # -------------------------------------------------
+        case "PFT":
+            chosen_offsets = data["chosen_offset_path"]
+            rejected_offsets = data["rejected_offset_path"]
+            
+            assert len(chosen_offsets) == len(rejected_offsets)
+            
+            num_examples = len(chosen_offsets) - 1
+
+            if rand:
+                ix = torch.randint(
+                    0,
+                    num_examples,
+                    (batch_size,),
+                )
+            else:
+                start = (step * batch_size) % num_examples
+                end = min(start + batch_size, num_examples)
+                ix = torch.arange(start, end)
+
+            chosen_inputs = []
+            chosen_labels = []
+
+            rejected_inputs = []
+            rejected_labels = []
+
+            chosen_offsets = data["chosen_offset_path"]
+            rejected_offsets = data["rejected_offset_path"]
+
+            for idx in ix.tolist():
+            
+                # --------------------
+                # chosen
+                # --------------------
+                s = chosen_offsets[idx]
+                e = chosen_offsets[idx + 1]
+            
+                chosen_ids = data["chosen_token_path"][s:e][:max_seq_len]
+                chosen_lbl = data["chosen_label_path"][s:e][:max_seq_len]
+            
+                chosen_inputs.append(
+                    torch.from_numpy(chosen_ids.astype(np.int64))
+                )
+            
+                chosen_labels.append(
+                    torch.from_numpy(chosen_lbl.astype(np.int64))
+                )
+            
+                # --------------------
+                # rejected
+                # --------------------
+                s = rejected_offsets[idx]
+                e = rejected_offsets[idx + 1]
+            
+                rejected_ids = data["rejected_token_path"][s:e][:max_seq_len]
+                rejected_lbl = data["rejected_label_path"][s:e][:max_seq_len]
+            
+                rejected_inputs.append(
+                    torch.from_numpy(rejected_ids.astype(np.int64))
+                )
+            
+                rejected_labels.append(
+                    torch.from_numpy(rejected_lbl.astype(np.int64))
+                )
+                
+            batch["chosen_input_ids"] = torch.nn.utils.rnn.pad_sequence(
+                chosen_inputs,
+                batch_first=True,
+                padding_value=0,
+            ).to(device)
+
+            batch["chosen_labels"] = torch.nn.utils.rnn.pad_sequence(
+                chosen_labels,
+                batch_first=True,
+                padding_value=0,
+            ).to(device)
+
+            batch["rejected_input_ids"] = torch.nn.utils.rnn.pad_sequence(
+                rejected_inputs,
+                batch_first=True,
+                padding_value=0,
+            ).to(device)
+
+            batch["rejected_labels"] = torch.nn.utils.rnn.pad_sequence(
+                rejected_labels,
+                batch_first=True,
+                padding_value=0,
+            ).to(device)
+
+            batch["chosen_attention_mask"] = (
+                batch["chosen_input_ids"] != 0
+            ).long().to(device)
+
+            batch["rejected_attention_mask"] = (
+                batch["rejected_input_ids"] != 0
+            ).long().to(device)
+
+        # -------------------------------------------------
+        # Pretraining
+        # -------------------------------------------------
+        case _:
+
+            start = (step * batch_size * max_seq_len) % (
+                data_len - max_seq_len - 1
+            )
+
+            if rand:
+                ix = torch.randint(
+                    start,
+                    data_len - max_seq_len - 1,
+                    (batch_size,),
+                )
+            else:
+                ix = torch.arange(
+                    start,
+                    start + batch_size * max_seq_len,
+                    max_seq_len,
+                )
+
+            batch["inputs"] = torch.stack([
+                torch.from_numpy(
+                    data["token_path"][i:i + max_seq_len].astype(np.int64)
+                )
+                for i in ix
+            ]).to(device)
+
+            batch["labels"] = torch.stack([
+                torch.from_numpy(
+                    data["token_path"][i + 1:i + 1 + max_seq_len].astype(np.int64)
+                )
+                for i in ix
+            ]).to(device)
+
+    return batch
 
 from tqdm import tqdm
 
 @torch.no_grad()
-def evaluate_loss(model, data, batch_size, max_seq_len, device, eval_steps=1000, data_labels = None):
+def evaluate_loss(model, reference_model, reference_checkpoint_dir, data, data_len, batch_size, max_seq_len, device, pipeline:str, eval_steps=1000):
     model.eval()
 
     total_loss = 0.0
 
+    skipped_batch = 0
     for step in tqdm(range(eval_steps)):
-        x, y = get_batch(
+        batch = get_batch(
             step,
             data,
-            len(data),
+            data_len,
             batch_size,
             max_seq_len,
             device,
-            rand = True,
-            instruction_set=True,
-            labels = data_labels
+            pipeline,
+            
+            rand = True
         )
-
-        with autocast(device_type=device_type, dtype=ptdtype):
-            logits, loss = model(x, y)
+        if (
+            batch["chosen_input_ids"].shape[1] == 0
+            or batch["chosen_labels"].shape[1] == 0
+            or batch["rejected_input_ids"].shape[1] == 0
+            or batch["rejected_labels"].shape[1] == 0
+        ):
+            # print("Skipping empty sequence batch.")
+            skipped_batch += 1
+            continue
+            
+        if pipeline == 'PFT':
+            loss, chosen_reward, rejected_reward = dpo_loss(
+                policy_model = model,
+                reference_model_checkpoint_dir = reference_checkpoint_dir,
+                reference_model_name = reference_model,
+                chosen_input_ids = batch["chosen_input_ids"],
+                chosen_labels = batch["chosen_labels"],
+                rejected_input_ids = batch["rejected_input_ids"],
+                rejected_labels = batch["rejected_labels"],
+                beta = 0.1,
+                device_type = device_type,
+                dtype = ptdtype
+            )
+        else:
+            with autocast(device_type=device_type, dtype=ptdtype):
+                logits, loss = model(batch['inputs'], batch['labels'])
         
         if torch.isnan(loss):
+            skipped_batch += 1
             continue
         total_loss += loss.item()
         
-    
-        del logits 
-        del loss 
     torch.cuda.empty_cache()
 
     model.train()
 
-    return total_loss / eval_steps
+    return total_loss / (eval_steps -skipped_batch)
 
 import csv
 from pathlib import Path
+from dpo_trainer import dpo_loss
 
 def init_csv(csv_path):
     if not Path(csv_path).exists():
@@ -215,18 +393,55 @@ def log_metrics(csv_path, step, loss, lr):
     
     file.flush()
         
+# DATAPATH = {
+#     "train": {
+#         "token_path": "Datasets/Tokens/sft_train_tokens.bin",
+#         "label_path": "Datasets/Tokens/sft_train_labels.bin"
+#     },
+#     "validation": {
+#         "token_path": "Datasets/Tokens/sft_val_tokens.bin",
+#         "label_path": "Datasets/Tokens/sft_val_labels.bin"
+#     }
+# }
 DATAPATH = {
     "train": {
-        "token_path": "Datasets/Tokens/sft_train_tokens.bin",
-        "label_path": "Datasets/Tokens/sft_train_labels.bin",
-        "dataset_path": "Datasets/train",
+        "chosen_token_path": "Datasets/Tokens/pft_chosen_tokens.bin",
+        "chosen_label_path": "Datasets/Tokens/pft_chosen_labels.bin",
+        "rejected_token_path": "Datasets/Tokens/pft_rejected_tokens.bin",
+        "rejected_label_path": "Datasets/Tokens/pft_rejected_labels.bin",
+        "chosen_offset_path":"Datasets/Tokens/pft_chosen_offsets.bin",
+        "rejected_offset_path":"Datasets/Tokens/pft_rejected_offsets.bin",
     },
     "validation": {
-        "token_path": "Datasets/Tokens/sft_val_tokens.bin",
-        "label_path": "Datasets/Tokens/sft_val_labels.bin",
-        "dataset_path": "Datasets/validation",
+        "chosen_token_path": "Datasets/Tokens/pft_chosen_tokens.bin",
+        "chosen_label_path": "Datasets/Tokens/pft_chosen_labels.bin",
+        "rejected_token_path": "Datasets/Tokens/pft_rejected_tokens.bin",
+        "rejected_label_path": "Datasets/Tokens/pft_rejected_labels.bin",
+        "chosen_offset_path":"Datasets/Tokens/pft_chosen_offsets.bin",
+        "rejected_offset_path":"Datasets/Tokens/pft_rejected_offsets.bin",
     }
 }
+
+from typing import Dict, Any
+def load_dataset(datapath: Dict[str, Any]):
+    data = {}
+
+    for split, files in datapath.items():
+        data[split] = {}
+
+        for name, path in files.items():
+            data[split][name] = np.memmap(
+                path,
+                dtype=np.uint16,
+                mode="r"
+            )
+
+    return data
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+
 
 if __name__ == "__main__":
     args = parse_arguments()
@@ -242,15 +457,17 @@ if __name__ == "__main__":
 
     # 1. ENCODE DATASET
     tokenizer = BPETokenizer(path="Datasets/tokenizer.json")
-    prepare_datasets(DATAPATH)
+    # prepare_datasets(DATAPATH)
 
-    # 2. LOAD MEMMAPPED TOKEN DATA    
-    train_data = np.memmap(DATAPATH['train']['token_path'], dtype=np.uint16, mode="r")
-    val_data = np.memmap(DATAPATH['validation']['token_path'], dtype=np.uint16, mode="r")
+    # 2. LOAD MEMMAPPED TOKEN DATA
+    Data = load_dataset(DATAPATH)
     
-    if args.pipeline == 'it':
-        train_data_labels = np.memmap(DATAPATH['train']['label_path'], dtype=np.uint16, mode="r")
-        val_data_labels = np.memmap(DATAPATH['validation']['label_path'], dtype=np.uint16, mode="r")
+    # train_data = np.memmap(DATAPATH['train']['token_path'], dtype=np.uint16, mode="r")
+    # val_data = np.memmap(DATAPATH['validation']['token_path'], dtype=np.uint16, mode="r")
+    
+    # if args.pipeline == 'IFT':
+    #     train_data_labels = np.memmap(DATAPATH['train']['label_path'], dtype=np.uint16, mode="r")
+    #     val_data_labels = np.memmap(DATAPATH['validation']['label_path'], dtype=np.uint16, mode="r")
 
     # 4. Instantiate Model and Setup Device / Precision
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -292,16 +509,24 @@ if __name__ == "__main__":
     match args.model:
         case "gpt2":
             model = Model(Config(vocab_size=tokenizer.vocab_size, block_size=args.max_seq_len))
+            # if args.pipeline == 'PFT':
+            #     reference_model = Model(Config(vocab_size=tokenizer.vocab_size, block_size=args.max_seq_len))
+            
         case _:
             model = Model(Config(vocab_size=tokenizer.vocab_size, block_size=args.max_seq_len))
-
+            # if args.pipeline == 'PFT':
+            #     reference_model = Model(Config(vocab_size=tokenizer.vocab_size, block_size=args.max_seq_len))
+            
     # if args.gradient_checkpointing:
     #     model.gradient_checkpointing = True
     #     print("Gradient Checkpointing enabled from scratch.")
-
-    model.to(device)
     
-    args.learning_rate = args.learning_rate if args.pipeline == "pt" else 1e-4
+    model.to(device)
+    # if args.pipeline == 'PFT':
+    #     reference_model.to(device)
+    
+    
+    args.learning_rate = args.learning_rate if args.pipeline == "PT" else 1e-4
     # 5. Setup Optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(), weight_decay=args.weight_decay, lr=args.learning_rate
@@ -341,7 +566,7 @@ if __name__ == "__main__":
                 f"Warning: Checkpoint path '{resume_path}' not found. Starting training from scratch (step 0)."
             )
             
-    if args.pipeline == 'it' and args.resume is None:
+    if args.pipeline == 'IFT' and args.resume is None:
         resume_path = os.path.join(args.checkpoint_dir, f"{args.model}_{args.pipeline}.pt")
         if os.path.exists(resume_path):
             print(f"Resuming training from checkpoint: {resume_path}")
@@ -356,6 +581,42 @@ if __name__ == "__main__":
             print(
                 f"Warning: Checkpoint path '{resume_path}' not found. Starting training from scratch (step 0)."
             )
+    
+    if args.pipeline == 'PFT' and args.resume is None:
+        resume_path = os.path.join(args.checkpoint_dir, f"{args.model}_{args.pipeline}.pt")
+        reference_resume_path = os.path.join(args.checkpoint_dir, f"{args.model}_IFT.pt")
+        
+        if os.path.exists(resume_path):
+            print(f"Resuming training from checkpoint: {resume_path}")
+            checkpoint = torch.load(
+                resume_path, map_location=device, weights_only=False
+            )
+            model.load_state_dict(checkpoint["model_state_dict"])
+            print(
+                f"Resumed successfully. Continuing from step {step} with best val loss: {best_val_loss:.4f}"
+            )
+        else:
+            print(
+                f"Warning: Checkpoint path '{resume_path}' not found. Starting training from scratch (step 0)."
+            )
+        
+        # if os.path.exists(reference_resume_path):
+        #     print(f"Loading Reference Model: {reference_resume_path}")
+        #     reference_checkpoint = torch.load(
+        #         reference_resume_path, map_location=device, weights_only=False
+        #     )
+        #     reference_model.load_state_dict(reference_checkpoint["model_state_dict"])
+        #     print(
+        #         f"Resumed successfully. Continuing from step {step} with best val loss: {best_val_loss:.4f}"
+        #     )
+        #     reference_model.eval()
+            
+        #     for p in reference_model.parameters():
+        #         p.requires_grad = False
+        # else:
+        #     print(
+        #         f"Warning: Checkpoint path '{resume_path}' not found. Starting training from scratch (step 0)."
+        #     )
     t0 = time.time()
 
     
@@ -368,7 +629,16 @@ if __name__ == "__main__":
     GRAD_ACCUM_STEPS = args.grad_accum_steps  # 4
     EFFECTIVE_BATCH_SIZE = BATCH_SIZE * GRAD_ACCUM_STEPS  # 32
     
-    datalen = len(train_data)
+    if args.pipeline == 'PFT':
+        train_data = Data['train']['chosen_token_path']
+        val_data = Data['validation']['chosen_token_path']
+        
+    else:
+        train_data = Data['train']['token_path']
+        val_data = Data['validation']['token_path']
+        
+    train_len = len(train_data)
+    val_len = len(val_data)
     
     num_params = sum(p.numel() for p in model.parameters())
     
@@ -379,7 +649,7 @@ if __name__ == "__main__":
     )
 
     steps_per_epoch = math.ceil(
-        len(train_data) / tokens_per_step
+        train_len / tokens_per_step
     )
     # Save a run metadata JSON
     run_meta = {
@@ -393,7 +663,7 @@ if __name__ == "__main__":
     print(
         "\n--------------------------------------------------------------------------"
     )
-    print(f"DATASET: TRAIN TOKENS {datalen:,}| VALIDATION TOKENS: {len(val_data):,} | TOKENS PER STEPS: {tokens_per_step}| STEPS PER EPOCH: {steps_per_epoch}")
+    print(f"DATASET: TRAIN TOKENS {train_len:,}| VALIDATION TOKENS: {val_len:,} | TOKENS PER STEPS: {tokens_per_step}| STEPS PER EPOCH: {steps_per_epoch}")
     print(f"DEVICE: {device} MODEL: {args.model}| PARAMETERS:{num_params/(1024*1024)}| BATCH SIZE:{BATCH_SIZE}")
     print(
         "----------------------------------------------------------------------------\n"
@@ -428,23 +698,59 @@ if __name__ == "__main__":
                 from torch.amp import autocast
 
                 device_type = "cuda" if device.type == "cuda" else "cpu"
-
+                
+                skipped_batch = 0
                 for micro_step in range(GRAD_ACCUM_STEPS):
+                    
                     global_micro_step = step*GRAD_ACCUM_STEPS + micro_step
 
-                    x, y = get_batch(
-                        global_micro_step, train_data, datalen, BATCH_SIZE, args.max_seq_len, device, instruction_set = True, labels = train_data_labels
-                    )
+                    # x, y = get_batch(
+                    #     global_micro_step, train_data, datalen, BATCH_SIZE, args.max_seq_len, device, instruction_set = True, labels = train_data_labels
+                    # )
                     # print(y.dtype)
                     # print(y.min().item(), y.max().item())
                     # print(tokenizer.vocab_size)
                     #print("AFTER TRAIN DATASET ",torch.cuda.memory_allocated()/1024**2,"\n")
 
-                    with autocast(device_type=device_type, dtype=ptdtype):
-                        logits, loss = model(x, y)
-                        loss = loss / GRAD_ACCUM_STEPS
+                    # with autocast(device_type=device_type, dtype=ptdtype):
+                    #     logits, loss = model(x, y)
+                        
                         
                     #print("AFTER TRAIN FORWARD ",torch.cuda.memory_allocated()/1024**2,"\n")
+                    # ---------------------------------------------------------------------
+                    batch = get_batch(
+                        global_micro_step, Data['train'], train_len, BATCH_SIZE, args.max_seq_len, device, args.pipeline
+                    )
+                    
+                    if (
+                        batch["chosen_input_ids"].shape[1] == 0
+                        or batch["chosen_labels"].shape[1] == 0
+                        or batch["rejected_input_ids"].shape[1] == 0
+                        or batch["rejected_labels"].shape[1] == 0
+                    ):
+                        print("Skipping empty sequence batch.")
+                        skipped_batch += 1
+                        continue
+                    
+                    if args.pipeline == 'PFT':
+                        loss, chosen_reward, rejected_reward = dpo_loss(
+                            policy_model = model,
+                            reference_model_checkpoint_dir = args.checkpoint_dir,
+                            reference_model_name = args.model,
+                            chosen_input_ids = batch["chosen_input_ids"],
+                            chosen_labels = batch["chosen_labels"],
+                            rejected_input_ids = batch["rejected_input_ids"],
+                            rejected_labels = batch["rejected_labels"],
+                            beta = 0.1,
+                            device_type = device_type,
+                            dtype = ptdtype
+                        )
+                    else:
+                        
+                        with autocast(device_type=device_type, dtype=ptdtype):
+                            logits, loss = model(batch['inputs'], batch['labels']) # X, Y
+                    
+                    loss = loss / (GRAD_ACCUM_STEPS-skipped_batch)
                     
                     if torch.isnan(loss):
                         print("NaN loss encountered, skipping batch")
@@ -457,6 +763,11 @@ if __name__ == "__main__":
                         scaler.scale(loss).backward()
                     else:
                         loss.backward()
+                        
+                    
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    
+                    # 
                         
                     #print("AFTER TRAIN BACKWARD ",torch.cuda.memory_allocated()/1024**2,"\n")
 
@@ -518,11 +829,14 @@ if __name__ == "__main__":
 
             val_loss = evaluate_loss(
                 model,
-                val_data,
+                args.model,
+                args.checkpoint_dir,
+                Data['validation'],
+                val_len,
                 1,
                 args.max_seq_len,
                 device,
-                data_labels=val_data_labels
+                args.pipeline
             )
             #print("AFTER VAL",torch.cuda.memory_allocated()/1024**2,"\n")
 
