@@ -18,14 +18,17 @@ You are a helpful, conversational AI companion. Keep your tone natural, engaging
 """
 
 @torch.no_grad()
-def generate(model, tokenizer, user_prompt, max_new_tokens, temperature=1.0, top_k=50, top_p=0.9, device="cpu"):
+async def generate(model, tokenizer, user_prompt, max_new_tokens, system_prompt:str|None=None, temperature=1.0, top_k=50, top_p=0.9, max_seq_len:int|None=512, device="cpu"):
     """
     Generates text from a prompt using KV caching and sampling.
     """
-    system_prompt = SYSTEM_PROMPT
-    model.eval()
-    prompt = "<|SYSTEM|>"+system_prompt + "<|USER|>"+ user_prompt + "<|ASSISTANT|>"
-    # 1. Encode prompt
+    
+    if system_prompt:
+        prompt = "<|SYSTEM|>"+system_prompt + "<|USER|>"+ user_prompt + "<|ASSISTANT|>"
+    else:
+        prompt = user_prompt
+    
+    # 1. ENCODE PROMPT
     tokenized = tokenizer.encode(prompt)
 
     input_ids =tokenized.ids
@@ -33,23 +36,23 @@ def generate(model, tokenizer, user_prompt, max_new_tokens, temperature=1.0, top
         input_ids.pop()
 
     if not input_ids:
-        # If prompt was empty or tokenized to nothing, use endoftext
         input_ids = [tokenizer.bos_id]
+        
+    
 
-    print(tokenizer.decode(input_ids), end="\n\n", flush=True)
+    # print(tokenizer.decode(input_ids), end="\n\n", flush=True)
 
     input_tensor = torch.tensor([input_ids], dtype=torch.long, device=device) # [1, T]
 
     generated = list(input_ids)
-    past_key_values = None
     curr_input = input_tensor
 
-    end_of_text_id = tokenizer.eos_id
-
     num_new_tokens = 0
-    start_time = time.perf_counter()
-
+    
+    # 2. GENERATE NEW TOKEN LOOP
+    model.eval()
     for i in range(max_new_tokens):
+        start_time = time.perf_counter()
         num_new_tokens += 1
 
         logits, _ = model(curr_input, None)
@@ -108,18 +111,21 @@ def generate(model, tokenizer, user_prompt, max_new_tokens, temperature=1.0, top
             dtype=torch.long,
             device=device
         )
-        if len(generated) > 512:
+        if max_seq_len and len(generated) > max_seq_len:
             break
-        print(tokenizer.decode([next_token_id]), end=" ", flush=True)
+            
+        end_time = time.perf_counter()
+        yield start_time-end_time, tokenizer.decode([next_token_id])
 
-    end_time = time.perf_counter()
-    print("\n\n TOKENS /SEC : ", num_new_tokens / (end_time - start_time))
-    return tokenizer.decode(generated)
+    
+    # print("\n\n TOKENS /SEC : ", num_new_tokens / (end_time - start_time))
+    # return tokenizer.decode(generated)
 
 from Datasets.tokenizer import BPETokenizer
 from model import Config, Model
 from dataclasses import dataclass, field
 from typing import Literal, Optional
+import asyncio
 
 @dataclass
 class TrainingConfig:
@@ -188,7 +194,7 @@ def main():
     # Set checkpoint path if not provided
     checkpoint_file = args.checkpoint
     if checkpoint_file is None:
-        checkpoint_file = f"checkpoints/{args.model}_PFT.pt"
+        checkpoint_file = f"checkpoints/{args.model}_IFT.pt"
 
     # Initialize model
     match args.model:
@@ -200,7 +206,7 @@ def main():
     # Load weights
     if os.path.exists(checkpoint_file):
         print(f"Loading checkpoint weights from {checkpoint_file}...")
-        checkpoint = torch.load(checkpoint_file, map_location=device, weights_only=False )
+        checkpoint = torch.load(checkpoint_file, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
         print("Loaded successfully")
     else:
@@ -211,16 +217,22 @@ def main():
     # Generate text
     # print(f"\nGenerating {args.max_new_tokens} tokens with prompt: \"{args.prompt}\"")
     print("-" * 60)
-    output_text = generate(
-        model=model,
-        tokenizer=tokenizer,
-        user_prompt=args.prompt,
-        max_new_tokens=args.max_new_tokens,
-        temperature=args.temperature,
-        top_k=args.top_k,
-        top_p=args.top_p,
-        device=device
-    )
+    async def generated():
+        async for time, token in generate(
+            model=model,
+            tokenizer=tokenizer,
+            user_prompt=args.prompt,
+            max_new_tokens=args.max_new_tokens,
+            system_prompt=SYSTEM_PROMPT,
+            temperature=args.temperature,
+            top_k=args.top_k,
+            top_p=args.top_p,
+            device=device
+        ):
+            print(token,  end=" ", flush=True)
+    
+    asyncio.run(generated())
+    
     # print(output_text)
     print("\n")
     print("-" * 60)
