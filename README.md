@@ -210,34 +210,25 @@ $$\text{MoE}(X) = \sum_{i \in \text{TopK}} \text{Router}(X)_i \cdot \text{Expert
 
 ---
 
-## 🏗️ Structural Dataflow
+## Model Architecture
 
 The schematic sequence mapping input text processing through the networks is illustrated below:
 
-```mermaid
-graph TD
-    A[Input Token IDs] --> B[EmbeddingLayer: Token + Position]
-    B --> C[Block 1]
-    C --> D[Block 2]
-    D --> E[... Block N]
-    E --> F[RMSNorm / LayerNorm]
-    F --> G[Linear Head Projector]
-    G --> H[Logits / Probabilities]
-
-    subgraph Block ["Transformer Block Structure (Pre-LN)"]
-        direction TB
-        B1[Block Input X] --> B2[RMSNorm]
-        B2 --> B3[Causal Multi-Head Attention]
-        B3 --> B4[Dropout]
-        B4 --> B5[Residual Add: X + Attention]
-        B1 -.-> B5
-        
-        B5 --> B6[RMSNorm]
-        B6 --> B7[Gated FeedForward / MoE]
-        B7 --> B8[Dropout]
-        B8 --> B9[Residual Add: X + FeedForward]
-        B5 -.-> B9
-    end
+```
+ [OUTPUT]
+    │
+    + ──────────┐
+    |   ┌──────────────────────────┐  
+    │   |        FEEDFORWARD       │
+    │   └──────────────────────────┘
+    |──[RMS-NORM]───┘
+    + ──────────┐
+    │   ┌──────────────────────────┐   
+    │   |   MULTI-HEAD ATTENTION   │
+    │   └──────────────────────────┘
+    └──[RMS-NORM]───┘
+    │
+ [INPUT] + ──[LEARNED ENCODING]
 ```
 
 ---
