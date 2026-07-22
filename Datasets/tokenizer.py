@@ -77,6 +77,12 @@ class BPETokenizer:
                             yield message_dict["content"]
 
         self.tokenizer.train_from_iterator(batch_iterator(), trainer)
+    
+    def save(self, path:str):
+        from transformers import PreTrainedTokenizerFast
+
+        hf_tokenizer = PreTrainedTokenizerFast(tokenizer_object=self.tokenizer)
+        hf_tokenizer.save_pretrained(path)
 
     def encode(self, input: list[str] | str):
         if isinstance(input, str):

@@ -12,3 +12,6 @@ pandas
 
 # Evaluation
 lm-eval
+
+# Pytorch --> Huggingface
+transformers
