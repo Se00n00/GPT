@@ -6,7 +6,6 @@
 [![GPU Accelerated](https://img.shields.io/badge/CUDA-Accelerated-green.svg?logo=nvidia&logoColor=white)](#)
 [![Pipeline: PT | IFT | PFT](https://img.shields.io/badge/Pipeline-PT%20%7C%20IFT%20%7C%20PFT-orange.svg)](#)
 
-**Hugging Face Model Card:** [https://huggingface.co/Se00n00/TinyLM-1-70M](https://huggingface.co/Se00n00/TinyLM-1-70M)
 
 **TinyLM-1-70M** is an end-to-end, lightweight PyTorch custom transformer framework designed for efficient training, alignment, and evaluation of compact language models (~70M parameters). Engineered for research and resource-constrained environments, it provides clean, PyTorch-native implementations across the full LLM lifecycle—from autoregressive pre-training (PT) and supervised instruction fine-tuning (IFT) to Direct Preference Optimization (DPO). TinyLM-1-70M incorporates modern architectural features (RMSNorm, SwiGLU, pre-normalization, and experimental Mixture-of-Experts) while providing complete transparency and full control over every layer.
 
@@ -78,7 +77,7 @@ LearnedEmbedding(X:[B, L]): --> [B, L, D]
 
 ---
 
-### 2. Normalization Layers (RMSNorm)
+### 2. Normalization Layers [RMSNorm](file:///run/media/se00n00/P/LittleParrot/GPT/model.py#L36)
 
 Performs scale-normalization on layer inputs. The model uses RMSNorm to omit the mean-centering step for faster training throughput:
 
@@ -101,7 +100,7 @@ RMSNorm(X:[B, L, D]):  --> [B, L, D]
 ```
 
 #### Active Code Location
-* Class: [RMSNorm](file:///run/media/se00n00/P/LittleParrot/GPT/model.py#L36) in [model.py](file:///run/media/se00n00/P/LittleParrot/GPT/model.py). (Standard [LayerNorm](file:///run/media/se00n00/P/LittleParrot/GPT/model.py#L25) is also available).
+* Class:  in [model.py](file:///run/media/se00n00/P/LittleParrot/GPT/model.py). (Standard [LayerNorm](file:///run/media/se00n00/P/LittleParrot/GPT/model.py#L25) is also available).
 
 ---
 
