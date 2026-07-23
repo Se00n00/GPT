@@ -1,18 +1,53 @@
-# 🦜 TinyLM-1-70M: Deep-Dive Custom Transformer Framework
+# TinyLM-1-70M: Deep-Dive Custom Transformer Framework
 
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-TinyLM--1--70M-FFD21E.svg?logo=huggingface&logoColor=black)](https://huggingface.co/Se00n00/TinyLM-1-70M)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](#)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg?logo=pytorch&logoColor=white)](#)
 [![GPU Accelerated](https://img.shields.io/badge/CUDA-Accelerated-green.svg?logo=nvidia&logoColor=white)](#)
 [![Pipeline: PT | IFT | PFT](https://img.shields.io/badge/Pipeline-PT%20%7C%20IFT%20%7C%20PFT-orange.svg)](#)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](file:///run/media/se00n00/P/LittleParrot/GPT/LICENSE)
 
-**TinyLM-1-70M** is a modular, high-performance, and feature-rich framework written in PyTorch for training, aligning, and deploying custom Generative Pre-trained Transformer (GPT) models. Spanning the entire life cycle of modern Large Language Models (LLMs), it provides PyTorch-native implementations of autoregressive pre-training, supervised instruction fine-tuning, vocabulary expansion, and direct preference alignment.
+**Hugging Face Model Card:** [https://huggingface.co/Se00n00/TinyLM-1-70M](https://huggingface.co/Se00n00/TinyLM-1-70M)
+
+**TinyLM-1-70M** is an end-to-end, lightweight PyTorch custom transformer framework designed for efficient training, alignment, and evaluation of compact language models (~70M parameters). Engineered for research and resource-constrained environments, it provides clean, PyTorch-native implementations across the full LLM lifecycle—from autoregressive pre-training (PT) and supervised instruction fine-tuning (IFT) to Direct Preference Optimization (DPO). TinyLM-1-70M incorporates modern architectural features (RMSNorm, SwiGLU, pre-normalization, and experimental Mixture-of-Experts) while providing complete transparency and full control over every layer.
 
 ---
 
-## 📐 Mathematical & Algorithmic Architecture
+## Navigation Menu
 
-TinyLM-1-70M leverages a pre-normalization architecture with gated feedforward networks and optional Mixture of Experts. Below is the integrated breakdown of each layer, combining mathematical formulations, your original algorithmic pseudocode, and references to the active code.
+- [Architecture](#mathematical--algorithmic-architecture)
+- [Installation](#installation--data-preparation)
+- [3-Stage Pipeline](#the-3-stage-llm-pipeline)
+- [Streaming Inference](#asynchronous-streaming-inference)
+- [Model Evaluation](#model-evaluation)
+
+---
+
+## Mathematical & Algorithmic Architecture
+
+TinyLM-1-70M leverages a pre-normalization architecture with gated feedforward networks and optional Mixture of Experts.
+
+### Model Architecture Overview
+
+The schematic sequence mapping input text processing through the networks is illustrated below:
+
+```
+ [OUTPUT]
+    │
+    + ──────────┐
+    |   ┌──────────────────────────┐  
+    │   |        FEEDFORWARD       │
+    │   └──────────────────────────┘
+    |──[RMS-NORM]───┘
+    + ──────────┐
+    │   ┌──────────────────────────┐   
+    │   |   MULTI-HEAD ATTENTION   │
+    │   └──────────────────────────┘
+    └──[RMS-NORM]───┘
+    │
+ [INPUT] + ──[LEARNED ENCODING]
+```
+
+Below is the integrated breakdown of each constituent layer, combining mathematical formulations, algorithmic pseudocode, and references to active code locations.
 
 ### 1. Learned Embeddings
 
@@ -210,55 +245,7 @@ $$\text{MoE}(X) = \sum_{i \in \text{TopK}} \text{Router}(X)_i \cdot \text{Expert
 
 ---
 
-## Model Architecture
-
-The schematic sequence mapping input text processing through the networks is illustrated below:
-
-```
- [OUTPUT]
-    │
-    + ──────────┐
-    |   ┌──────────────────────────┐  
-    │   |        FEEDFORWARD       │
-    │   └──────────────────────────┘
-    |──[RMS-NORM]───┘
-    + ──────────┐
-    │   ┌──────────────────────────┐   
-    │   |   MULTI-HEAD ATTENTION   │
-    │   └──────────────────────────┘
-    └──[RMS-NORM]───┘
-    │
- [INPUT] + ──[LEARNED ENCODING]
-```
-
----
-
-## 📂 Project Directory Hierarchy
-
-Below is the workspace layout highlighting the role of each module:
-
-* [model.py](file:///run/media/se00n00/P/LittleParrot/GPT/model.py) / [Model/](file:///run/media/se00n00/P/LittleParrot/GPT/Model) — Model files:
-  * [Model](file:///run/media/se00n00/P/LittleParrot/GPT/Model/models.py#L8) — Main decoder-only wrapper.
-  * [layers.py](file:///run/media/se00n00/P/LittleParrot/GPT/Model/layers.py) — Low-level layers (`Attention`, `RMSNorm`, `FeedForward`, `MoE`).
-  * [loss.py](file:///run/media/se00n00/P/LittleParrot/GPT/Model/loss.py) — Objective functions ([token_level_kd_loss](file:///run/media/se00n00/P/LittleParrot/GPT/Model/loss.py#L14)).
-* [Trainer/](file:///run/media/se00n00/P/LittleParrot/GPT/Trainer) — Training infrastructure:
-  * [gpu.py](file:///run/media/se00n00/P/LittleParrot/GPT/Trainer/gpu.py) — Device telemetry checks ([check_and_cooldown_gpu](file:///run/media/se00n00/P/LittleParrot/GPT/Trainer/gpu.py#L19), [check_vram_limit](file:///run/media/se00n00/P/LittleParrot/GPT/Trainer/gpu.py#L34)).
-  * [dataset_preparation.py](file:///run/media/se00n00/P/LittleParrot/GPT/Trainer/dataset_preparation.py) — Tokenization and binary exporting pipeline.
-  * [text_dataset.py](file:///run/media/se00n00/P/LittleParrot/GPT/Trainer/text_dataset.py) — Memory-mapped file stream dataset.
-  * [util.py](file:///run/media/se00n00/P/LittleParrot/GPT/Trainer/util.py) — Linear warmup / cosine decay scheduler.
-* [Datasets/](file:///run/media/se00n00/P/LittleParrot/GPT/Datasets) — Tokenizers and data instructions:
-  * [tokenizer.py](file:///run/media/se00n00/P/LittleParrot/GPT/Datasets/tokenizer.py) — Custom BPETokenizer class.
-  * [dataset.md](file:///run/media/se00n00/P/LittleParrot/GPT/Datasets/dataset.md) — Raw documentation on data prep setup.
-* [train.py](file:///run/media/se00n00/P/LittleParrot/GPT/train.py) — Advanced trainer logic equipped with self-healing Memory Guard and Thermal Guard.
-* [dpo_trainer.py](file:///run/media/se00n00/P/LittleParrot/GPT/dpo_trainer.py) — Direct Preference Optimization trainer with memory efficiency routines.
-* [expand_model.py](file:///run/media/se00n00/P/LittleParrot/GPT/expand_model.py) — Weight transfer utility for vocab extensions.
-* [sft_dataset.py](file:///run/media/se00n00/P/LittleParrot/GPT/sft_dataset.py) — Script to mask out user prompts for Supervised Fine-Tuning.
-* [inference.py](file:///run/media/se00n00/P/LittleParrot/GPT/inference.py) — Asynchronous streaming generator CLI tool.
-* [requirements.txt](file:///run/media/se00n00/P/LittleParrot/GPT/requirements.txt) — Dependency list.
-
----
-
-## 🚀 Installation & Data Preparation
+## Installation & Data Preparation
 
 ### 1. Setup Environment
 ```bash
@@ -281,7 +268,7 @@ prepare_datasets(DATAPATH, tokenizer_dir="Datasets/tokenizer.json")
 
 ---
 
-## 🛠️ The 3-Stage LLM Pipeline
+## The 3-Stage LLM Pipeline
 
 | Stage | Mode Flag | Description | Loss Metric |
 | :--- | :--- | :--- | :--- |
@@ -337,35 +324,7 @@ python train.py \
 
 ---
 
-## 🛡️ Hardware Safeguards
-
-### Memory Guard (OOM Self-Healing)
-If PyTorch raises a CUDA Out of Memory exception at step execution:
-1. The trainer catches the error, flushes the cache, and halts the current pass.
-2. If the current micro-batch size $B > 1$, it sets $B \leftarrow \lfloor B/2 \rfloor$ and adjusts the gradient accumulation steps to keep the effective batch size constant.
-3. If $B = 1$ already, the trainer dynamically enables **gradient checkpointing** on the model parameters to trade compute for memory.
-4. The step is re-attempted without failing the training run.
-
-### Thermal Guard
-To protect hardware from prolonged heat stress, [gpu.py](file:///run/media/se00n00/P/LittleParrot/GPT/Trainer/gpu.py) checks GPU temperature:
-* Threshold triggering pause: `--max_temp` (default: `75°C`).
-* Resuming target temperature: `--cooldown_temp` (default: `60°C`).
-
----
-
-## 📈 Vocabulary Expansion
-
-When transitioning from pre-training tokenizers to SFT tokenizers (which introduce chat-centric tokens like `<|USER|>` and `<|ASSISTANT|>`), the vocabulary size changes. Use [expand_model.py](file:///run/media/se00n00/P/LittleParrot/GPT/expand_model.py) to map weights from a smaller vocab size to an expanded one:
-
-```bash
-python expand_model.py
-```
-
-This replicates pre-trained embedding and projection weights for existing token indices, while randomly initializing row entries matching new vocab additions, preserving downstream performance.
-
----
-
-## 💬 Asynchronous Streaming Inference
+## Asynchronous Streaming Inference
 
 Test your trained model using the interactive streaming CLI. It runs sampling asynchronously and prints tokens in real-time:
 
@@ -380,32 +339,7 @@ python inference.py \
 
 ---
 
-## 📊 Model Evaluation
-
-Evaluate checkpoints using standard language model benchmarks with the custom `lm_eval` wrapper in the [Evaluation](file:///run/media/se00n00/P/LittleParrot/GPT/Evaluation) directory.
-
-### Custom LM Harness Wrapper
-The evaluation suite contains a PyTorch-native adapter `CustomGPTLM` that hooks our custom transformer models directly into the `lm-evaluation-harness` (v0.4.x) framework:
-- **Loading & Alignment**: Automatically detects the vocabulary size from checkpoint state dicts to initialize the model layers, handling the tokenizer expansions (e.g., from `32768` to `32771` tokens).
-- **OOM Resilience**: Automatically reduces batch sizes or falls back to CPU if a CUDA Out of Memory error is raised during validation.
-- **Save Formats**: Full sample-level logs are outputted to JSON formats for downstream debugging and trace analyses.
-
-### Run Evaluation
-To evaluate a model checkpoint:
-```bash
-python Evaluation/eval.py --checkpoint checkpoints/TinyLM-1-70M_IFT.pt
-```
-
-To run a comparative evaluation of all checkpoints in the workspace:
-```bash
-python Evaluation/eval.py --checkpoint all
-```
-
-Parameters:
-- `--checkpoint`: Path to model checkpoint file (or `'all'`).
-- `--tasks`: Comma-separated benchmarks (default: `hellaswag,arc_easy,arc_challenge,piqa,winogrande,mmlu,sciq,openbookqa,commonsense_qa,blimp,gsm8k,triviaqa,wikitext`).
-- `--batch_size`: Evaluation batch size (default: `8`).
-- `--limit`: Limit the number of samples per task (for quick testing).
+## Model Evaluation
 
 ### Benchmark Comparison Results
 
@@ -415,21 +349,21 @@ All benchmark evaluations below were executed using `lm-evaluation-harness` (`lm
 
 Comparative zero-shot and few-shot evaluation results for pretrained base models:
 
-| Benchmark Task | Category | Shots | Metric | TinyLM-1-70M (Base, 70M) | GPT-2 (Base, 124M)* | Supra-50M (Base, 50M)* | SmolLM2-135M (Base, 135M)* |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **HellaSwag** | Commonsense Reasoning | 0-shot | AN* | 0.2568 | 0.3114 | 0.3178 | 0.4322 |
-| **ARC-Easy** | Science Question Answering | 0-shot | AN* | 0.3013 | 0.3948 | 0.4600 | 0.5871 |
-| **ARC-Challenge** | Complex Scientific Reasoning | 0-shot | AN* | 0.2637 | 0.2270 | 0.2500 | 0.2952 |
-| **PiQA** | Physical Commonsense Reasoning | 0-shot | AN* | 0.5550 | 0.6251 | 0.6208 | 0.6861 |
-| **SciQ** | General Science Knowledge | 0-shot | AN* | 0.2310 | 0.6440 | 0.6810 | 0.7860 |
-| **OpenBookQA** | Multi-hop Open Book QA | 0-shot | AN* | 0.3520 | 0.2720 | 0.3060 | 0.3260 |
-| **Winogrande** | Pronoun Disambiguation & Logic | 0-shot | Acc* | 0.5036 | 0.5162 | 0.5099 | 0.5304 |
-| **MMLU** (57 subjects) | Multi-task Domain Knowledge | 0-shot | Acc* | 0.2295 | 0.2292 | 0.2301 | 0.2410 |
-| **CommonsenseQA** | Conceptual Commonsense | 0-shot | Acc* | 0.1957 | 0.1957 | 0.1966 | 0.1933 |
-| **BLiMP** | Linguistic & Syntax Probe | 0-shot | Acc* | 0.7538 | 0.8215 | 0.7632 | 0.8007 |
-| **GSM8K** | Mathematical Problem Solving | 5-shot | EM* | 0.0015 | 0.0068 | 0.0235 | 0.0220 |
-| **TriviaQA** | Open-Domain Fact Retrieval | 0-shot | EM* | 0.0000 | 0.0030 | 0.0041 | 0.0495 |
-| **WikiText** | Language Modeling Perplexity | 0-shot | PPL* ↓ | 84.56 | 37.37 | 44.95 | 21.06 |
+| Category | Benchmark Task (Metric) | TinyLM-1-70M (Base, 70M) | GPT-2 (Base, 124M)* | Supra-50M (Base, 50M)* | SmolLM2-135M (Base, 135M)* |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Commonsense & Logic** | **HellaSwag** (AN*) | 0.2568 | 0.3114 | 0.3178 | **0.4322** |
+| | **CommonsenseQA** (Acc*) | 0.1957 | 0.1957 | **0.1966** | 0.1933 |
+| | **PiQA** (AN*) | 0.5550 | 0.6251 | 0.6208 | **0.6861** |
+| | **Winogrande** (Acc*) | 0.5036 | 0.5162 | 0.5099 | **0.5304** |
+| **Language Modeling** | **WikiText** (PPL* ↓) | 84.56 | 37.37 | 44.95 | **21.06** |
+| **Linguistic & Syntax** | **BLiMP** (Acc*) | 0.7538 | **0.8215** | 0.7632 | 0.8007 |
+| **Mathematical Reasoning** | **GSM8K** (5-shot, EM*) | 0.0015 | 0.0068 | **0.0235** | 0.0220 |
+| **Open-Domain Fact Retrieval** | **TriviaQA** (EM*) | 0.0000 | 0.0030 | 0.0041 | **0.0495** |
+| **Science & Domain Knowledge** | **ARC-Easy** (AN*) | 0.3013 | 0.3948 | 0.4600 | **0.5871** |
+| | **ARC-Challenge** (AN*) | 0.2637 | 0.2270 | 0.2500 | **0.2952** |
+| | **SciQ** (AN*) | 0.2310 | 0.6440 | 0.6810 | **0.7860** |
+| | **OpenBookQA** (AN*) | **0.3520** | 0.2720 | 0.3060 | 0.3260 |
+| | **MMLU** (57 subjects, Acc*) | 0.2295 | 0.2292 | 0.2301 | **0.2410** |
 
 `* Short-form metric definitions:`
 - **AN***: `acc_norm` (Length-normalized Accuracy)
@@ -444,33 +378,28 @@ Comparative zero-shot and few-shot evaluation results for pretrained base models
 
 Comparative evaluation results for instruction-fine-tuned (IFT) models:
 
-| Benchmark Task | Category | Shots | Metric | TinyLM-1-70M (Instruct, 70M) | SmolLM2-135M (Instruct, 135M)* |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| **HellaSwag** | Commonsense Reasoning | 0-shot | AN* | 0.2762 | 0.4031 |
-| **ARC-Easy** | Science Question Answering | 0-shot | AN* | 0.2929 | 0.4571 |
-| **ARC-Challenge** | Complex Scientific Reasoning | 0-shot | AN* | 0.2321 | 0.2858 |
-| **PiQA** | Physical Commonsense Reasoning | 0-shot | AN* | 0.5506 | 0.6725 |
-| **SciQ** | General Science Knowledge | 0-shot | AN* | 0.2260 | 0.6960 |
-| **OpenBookQA** | Multi-hop Open Book QA | 0-shot | AN* | 0.2920 | 0.3280 |
-| **Winogrande** | Pronoun Disambiguation & Logic | 0-shot | Acc* | 0.5036 | 0.5280 |
-| **MMLU** (57 subjects) | Multi-task Domain Knowledge | 0-shot | Acc* | 0.2295 | 0.2470 |
-| **CommonsenseQA** | Conceptual Commonsense | 0-shot | Acc* | 0.1957 | 0.2105 |
-| **BLiMP** | Linguistic & Syntax Probe | 0-shot | Acc* | 0.6979 | 0.8039 |
-| **GSM8K** | Mathematical Problem Solving | 5-shot | EM* | 0.0182 | 0.0144 |
-| **TriviaQA** | Open-Domain Fact Retrieval | 0-shot | EM* | 0.0000 | 0.0035 |
-| **WikiText** | Language Modeling Perplexity | 0-shot | PPL* ↓ | 147.29 | 24.11 |
+| Category | Benchmark Task (Metric) | TinyLM-1-70M (Instruct, 70M) | SmolLM2-135M (Instruct, 135M)* |
+| :--- | :--- | :---: | :---: |
+| **Commonsense & Logic** | **HellaSwag** (AN*) | 0.2762 | **0.4031** |
+| | **CommonsenseQA** (Acc*) | 0.1957 | **0.2105** |
+| | **PiQA** (AN*) | 0.5506 | **0.6725** |
+| | **Winogrande** (Acc*) | 0.5036 | **0.5280** |
+| **Instruction Following** | **IFEval** (Acc*) | 0.1232 | **0.2990** |
+| **Language Modeling** | **WikiText** (PPL* ↓) | 147.29 | **24.11** |
+| **Linguistic & Syntax** | **BLiMP** (Acc*) | 0.6979 | **0.8039** |
+| **Mathematical Reasoning** | **GSM8K** (5-shot, EM*) | **0.0182** | 0.0144 |
+| **Open-Domain Fact Retrieval** | **TriviaQA** (EM*) | 0.0000 | **0.0035** |
+| **Science & Domain Knowledge** | **ARC-Easy** (AN*) | 0.2929 | **0.4571** |
+| | **ARC-Challenge** (AN*) | 0.2321 | **0.2858** |
+| | **SciQ** (AN*) | 0.2260 | **0.6960** |
+| | **OpenBookQA** (AN*) | 0.2920 | **0.3280** |
+| | **MMLU** (57 subjects, Acc*) | 0.2295 | **0.2470** |
 
 `* Short-form metric definitions:`
 - **AN***: `acc_norm` (Length-normalized Accuracy)
 - **Acc***: `acc` (Standard Raw Accuracy)
 - **EM***: `exact_match` (Exact Match string accuracy)
 - **PPL***: `word_perplexity` (Perplexity on test set; lower score indicates better language modeling)
-- `*`: *Denotes reference models evaluated locally by us using `lm-eval`.*
+- `*`: *Denotes reference models evaluated locally by us using `lm-eval` (IFEval for TinyLM-1-70M reflects prompt strict: `0.0832`, inst strict: `0.1631`, avg: `0.1232`; SmolLM2-135M-Instruct IFEval avg: `0.2990`).*
 
 Evaluation details and full raw output predictions are saved under the [Evaluation/](file:///run/media/se00n00/P/LittleParrot/GPT/Evaluation) directory.
-
----
-
-## 📜 License
-
-This codebase is licensed under the [MIT License](file:///run/media/se00n00/P/LittleParrot/GPT/LICENSE). Feel free to modify and adapt it for research or commercial applications.
